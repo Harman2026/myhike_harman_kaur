@@ -4,6 +4,8 @@ import {
 import { db } from "./firebaseConfig.js";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { collection, getDocs, addDoc, serverTimestamp } from "firebase/firestore";
+import { updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+
 
 // Helper function to add the sample hike documents.
 function addHikeData() {
@@ -69,10 +71,19 @@ function showName() {
             ? userDoc.data().name                // 2️⃣ Otherwise fallback to Firebase displayName
             : user.displayName || user.email;    // 3️⃣ Otherwise fallback to email
 
-       // If the DOM element exists, update its text using a template literal to add "!"
+        // If the DOM element exists, update its text using a template literal to add "!"
         if (nameElement) {
             nameElement.textContent = `${name}!`;
         }
+        //add these two lines into the showName() function
+
+        //Read bookmarks as a plain array (no globals)
+        const userData = userDoc.data();
+        const bookmarks = userData?.bookmarks || [];
+
+        //Display cards, but now pass user's ID and bookmarks (array)
+        await displayCardsDynamically(user.uid, bookmarks);
+
     });
 }
 
@@ -91,7 +102,7 @@ function readQuote(day) {
     });
 }
 
-async function displayCardsDynamically() {
+async function displayCardsDynamically(userId, bookmarks) {
     let cardTemplate = document.getElementById("hikeCardTemplate");
     const hikesCollectionRef = collection(db, "hikes");
 
@@ -112,16 +123,75 @@ async function displayCardsDynamically() {
             // Add the link with the document ID
             newcard.querySelector(".read-more").href = `eachHike.html?docID=${doc.id}`;
 
+            const hikeDocID = doc.id;                                   //store the ID
+            const icon = newcard.querySelector("i.material-icons");    //get a pointer to the bookmark icon DOM
+
+            // Give this icon a unique id based on the hike ID
+            // Each icon DOM has a unique ID, so we can ge a pointer to it for toggling 
+            icon.id = "save-" + hikeDocID;   //"save-913848314830"
+
+            // Decide initial state from bookmarks array
+            // The .includes function returns TRUE if the id is in the bookmarks array
+            const isBookmarked = bookmarks.includes(hikeDocID);
+
+            // If this boolean is TRUE, then innerText is assigned "bookmark" (solid), otherwise it's hollow
+            // (using the conditional ternary operator)   Equivalent to: 
+            //    if (isBookmarked) {
+            //        icon.innerText = "bookmark";
+            //    } else {
+            //       icon.innerText = "bookmark_border";
+            //    }
+            icon.innerText = isBookmarked ? "bookmark" : "bookmark_border";
+
+            // On click, call toggleBookmark function
+            // (using the arrow function notation)   Equivalent to:
+            //    icon.onclick = function() {
+            //       toggleBookmark(userId, hikeDocID);
+            //    };
+            icon.onclick = () => toggleBookmark(userId, hikeDocID);
+
             // Attach the new card to the container
             document.getElementById("hikes-go-here").appendChild(newcard);
         });
     } catch (error) {
         console.error("Error getting documents: ", error);
     }
+
 }
 
+async function toggleBookmark(userId, hikeDocID) {
+    const userRef = doc(db, "users", userId);     // get a pointer to the user's document
+    const userSnap = await getDoc(userRef);       // read the user's document one time
+    const userData = userSnap.data() || {};       // default to empty user data
+    const bookmarks = userData.bookmarks || [];   // default to empty bookmarks array
+
+    const iconId = "save-" + hikeDocID;           // construct icon's unique ID given the hike ID
+    const icon = document.getElementById(iconId); // get a pointer to icon DOM
+
+    // JS function ".includes" will return true if an item is found in the array
+    const isBookmarked = bookmarks.includes(hikeDocID);
+
+    // Because this block of code as two aynchronous calls that can be risky/fail
+    // Here's an example of how to wrap it with a try/catch structure for error handling. 
+    try {
+        if (isBookmarked) {
+            // Remove from Firestore array
+            await updateDoc(userRef, { bookmarks: arrayRemove(hikeDocID) });
+            // Update the bookmark icon DOM
+            icon.innerText = "bookmark_border";
+
+        } else {
+            // Add to Firestore array
+            await updateDoc(userRef, { bookmarks: arrayUnion(hikeDocID) });
+            // Update the bookmark icon DOM 
+            icon.innerText = "bookmark";
+        }
+    } catch (err) {
+        console.error("Error toggling bookmark:", err);
+    }
+}
 // Call the function to display cards when the page loads
-displayCardsDynamically();
+//displayCardsDynamically();
 
 readQuote("tuesday");
 
